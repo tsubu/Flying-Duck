@@ -648,3 +648,21 @@ button.btn-sub.btn-x { background: #111; color: #fff; border-color: #111; box-sh
   .rpanel { padding: 18px 14px; }
   .result-screen td, .result-screen th { padding: 6px 5px; font-size: 12px; }
 }
+
+/* 着水後のリアクション吹き出し */
+.popup.react {
+  font-family: "M PLUS Rounded 1c", sans-serif;
+  font-weight: 900;
+  font-size: 40px;
+  animation: reactPop 2.4s cubic-bezier(.2, .9, .3, 1) forwards;
+}
+.popup.react.happy { color: #ffd23f; }
+.popup.react.dazed { color: #ffffff; }
+.popup.react.head { color: #b9c9ff; }
+@keyframes reactPop {
+  0% { transform: translate(-50%, -30%) scale(0.3); opacity: 0; }
+  12% { transform: translate(-50%, -60%) scale(1.15); opacity: 1; }
+  22% { transform: translate(-50%, -60%) scale(1); }
+  85% { transform: translate(-50%, -75%) scale(1); opacity: 1; }
+  100% { transform: translate(-50%, -95%) scale(0.95); opacity: 0; }
+}

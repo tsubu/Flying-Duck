@@ -41,6 +41,9 @@ const GAME = {
   startAlt: 130,          // 開始高度（かなり上空）
   waterLevel: 0,
   crashAlt: 2.5,          // これより低いと水没
+  floatY: 0.4,            // 時間切れで着水したときの浮かぶ高さ
+  landDescent: 1.8,       // 着水までの降下時間（秒）
+  landReact: 3.4,         // 着水後のリアクション時間（秒）
   pitchMax: 0.65,         // 最大ピッチ（ラジアン）
   pitchSpeed: 1.2,        // ピッチ変更速度
   baseSpeed: 28,          // 水平速度（m/s 相当）
@@ -201,6 +204,41 @@ class Sound {
     }
   }
 
+  // 短い音を順番に鳴らす
+  playNotes(notes, type = 'triangle', vol = 0.16) {
+    if (!this.ctx) return;
+    const t0 = this.ctx.currentTime;
+    notes.forEach(([freq, at, len, to]) => {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, t0 + at);
+      if (to) osc.frequency.exponentialRampToValueAtTime(to, t0 + at + len);
+      gain.gain.setValueAtTime(vol, t0 + at);
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + at + len);
+      osc.connect(gain).connect(this.ctx.destination);
+      osc.start(t0 + at);
+      osc.stop(t0 + at + len);
+    });
+  }
+
+  playSplash() {
+    this.playNotes([[420, 0, 0.35, 120]], 'sine', 0.2);
+  }
+
+  playReaction(kind) {
+    if (kind === 'happy') {
+      // 上がっていくファンファーレ
+      this.playNotes([[784, 0, 0.16], [988, 0.12, 0.16], [1175, 0.24, 0.16], [1568, 0.36, 0.45]]);
+    } else if (kind === 'dazed') {
+      // 間の抜けた「ぽわ〜ん」
+      this.playNotes([[440, 0, 0.5, 330], [392, 0.5, 0.7, 300]], 'sine', 0.18);
+    } else {
+      // 下がっていく「がーん」
+      this.playNotes([[392, 0, 0.32, 370], [370, 0.3, 0.32, 349], [349, 0.6, 0.9, 220]], 'sawtooth', 0.07);
+    }
+  }
+
   playPass(combo) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
@@ -291,6 +329,12 @@ class Duck {
     this.head = new THREE.Group();
     this.head.position.set(0, 1.3, 0.05);
     this.headBaseX = -1.05;            // 前傾を打ち消して顔を前に向ける
+    // 着水後のリアクション用
+    this.upright = 0;                  // 0：滑空姿勢 〜 1：水面で直立
+    this.uprightCur = 0;
+    this.reaction = null;              // 'happy' | 'dazed' | 'head' | null
+    this.armZCur = 0;
+    this.armYCur = 0;
     this.head.rotation.x = this.headBaseX;
     this.model.add(this.head);
     addPart(sphere, yellow, this.head, [0, 0, 0], [1.16, 1.04, 1.08]);
@@ -386,22 +430,58 @@ class Duck {
   }
 
   update(dt, pitch, bank, speed, flap = 0) {
+    const lerp = THREE.MathUtils.lerp;
+    const k = Math.min(1, dt * 8);
     // ピッチとバンク（移動方向に合わせて傾ける）
     this.body.rotation.x = pitch;
-    this.body.rotation.z = THREE.MathUtils.lerp(this.body.rotation.z, -bank * 0.4, Math.min(1, dt * 8));
-    this.body.rotation.y = THREE.MathUtils.lerp(this.body.rotation.y, bank * 0.15, Math.min(1, dt * 8));
+    this.body.rotation.z = lerp(this.body.rotation.z, -bank * 0.4, k);
+    this.body.rotation.y = lerp(this.body.rotation.y, bank * 0.15, k);
 
-    // 滑空しているので腕はほとんど動かない（微かな揺れのみ）
+    // 滑空姿勢 ⇔ 水面で直立した姿勢
+    this.uprightCur = lerp(this.uprightCur, this.upright, Math.min(1, dt * 4));
+    const u = this.uprightCur;
+    this.model.rotation.x = lerp(1.2, 0.06, u);
+    const headBase = lerp(this.headBaseX, 0, u);
+
     const t = performance.now() * 0.001;
-    // flap が大きいときは腕をパタパタ羽ばたかせる（上昇中）
+    // 滑空中の腕は微かな揺れのみ。flap が大きいときはパタパタ羽ばたく（上昇中）
     this.flapPhase = (this.flapPhase || 0) + dt * (9 + flap * 14);
-    const w = Math.sin(t * 3 + speed * 0.1) * 0.06 + Math.sin(this.flapPhase) * flap;
-    this.lWing.rotation.y = w;
-    this.rWing.rotation.y = -w;
+    const w = (Math.sin(t * 3 + speed * 0.1) * 0.06 + Math.sin(this.flapPhase) * flap) * (1 - u);
 
-    // 頭がフラフラ揺れる（ぼんやりした感じ）
-    this.head.rotation.z = Math.sin(t * 2.1) * 0.08;
-    this.head.rotation.x = this.headBaseX + Math.sin(t * 1.3) * 0.05;
+    // リアクション（腕の上げ下げ・頭の動き・跳ね）
+    let armZ = 0;      // 腕を上げる角度
+    let armY = 0;      // 腕を前へ回す角度
+    let headZ = Math.sin(t * 2.1) * 0.08;
+    let headX = headBase + Math.sin(t * 1.3) * 0.05;
+    let hop = 0;
+    if (this.reaction === 'happy') {
+      // 両腕を上げて振りながらぴょんぴょん跳ねる
+      armZ = 1.2 + Math.sin(t * 14) * 0.4;
+      hop = Math.abs(Math.sin(t * 6.5)) * 0.7;
+      headZ = Math.sin(t * 6.5) * 0.14;
+      headX = headBase - 0.12;
+    } else if (this.reaction === 'dazed') {
+      // 腕をだらんと下げ、頭をゆっくりフラフラ
+      armZ = -0.85;
+      headZ = Math.sin(t * 0.9) * 0.28;
+      headX = headBase + 0.1 + Math.sin(t * 0.7) * 0.06;
+    } else if (this.reaction === 'head') {
+      // 両腕を前へ回して頭の横を抱え、小刻みに震える
+      armZ = 0.85 + Math.sin(t * 30) * 0.03;
+      armY = 0.75;
+      headZ = Math.sin(t * 22) * 0.05;
+      headX = headBase + 0.12;
+    }
+    this.armZCur = lerp(this.armZCur, armZ, Math.min(1, dt * 7));
+    this.armYCur = lerp(this.armYCur, armY, Math.min(1, dt * 7));
+    this.lWing.rotation.z = -this.armZCur;
+    this.rWing.rotation.z = this.armZCur;
+    this.lWing.rotation.y = w + this.armYCur;
+    this.rWing.rotation.y = -w - this.armYCur;
+    this.model.position.y = -0.2 + hop;
+
+    this.head.rotation.z = headZ;
+    this.head.rotation.x = headX;
   }
 
   wingTip(side, target) {
@@ -938,7 +1018,7 @@ class Particles {
     return this.matCache.get(hex);
   }
 
-  burst(x, y, z, color) {
+  burst(x, y, z, color, ring = true) {
     const colors = [0xffd23f, 0xffffff, 0x7fe9ff, color ? color.getHex() : 0xff69b4];
     for (let i = 0; i < 36; i++) {
       const m = new THREE.Sprite(this.spriteMat(colors[Math.floor(Math.random() * colors.length)]));
@@ -958,7 +1038,7 @@ class Particles {
       this.scene.add(m);
       this.items.push(m);
     }
-    this.ring(x, y, z, color || new THREE.Color(0xffffff));
+    if (ring) this.ring(x, y, z, color || new THREE.Color(0xffffff));
   }
 
   splash(x, y, z) {
@@ -1161,6 +1241,9 @@ class Game {
     this.flap = 0;
     this.hoopsPassed = 0;
     this.maxCombo = 0;
+    this.stagePassed = 0;
+    this.stageMissed = 0;
+    this.landT = 0;
 
     // リザルト用（キャプチャ・スコア画像）
     this.lastResult = null;
@@ -1364,7 +1447,7 @@ class Game {
     }
   }
 
-  showPopup(worldPos, html, cls = '') {
+  showPopup(worldPos, html, cls = '', ms = 1000) {
     const p = this.toScreen(worldPos);
     if (!p.visible) return;
     const el = document.createElement('div');
@@ -1373,7 +1456,7 @@ class Game {
     el.style.left = `${p.x}px`;
     el.style.top = `${p.y}px`;
     this.elPopups.appendChild(el);
-    setTimeout(() => el.remove(), 1000);
+    setTimeout(() => el.remove(), ms);
   }
 
   retrigger(el, cls) {
@@ -1416,6 +1499,10 @@ class Game {
     this.speed = GAME.baseSpeed;
     this.state = 'intro';
     this.introTimer = 2.2;
+    this.stagePassed = 0;
+    this.stageMissed = 0;
+    this.duck.upright = 0;
+    this.duck.reaction = null;
 
     const cfg = STAGE_CONFIG[idx];
     this.elStage.textContent = cfg.name;
@@ -1513,7 +1600,13 @@ class Game {
   // タイトル・ゲームオーバー時：アヒルの周りをゆっくり回るカメラ
   updateIdle(dt) {
     const t = performance.now() * 0.001;
-    if (this.state === 'start' || this.state === 'ended') {
+    if (this.state === 'ended') {
+      // 全面クリア後は水面に浮いてリアクションを続ける
+      this.duckY = GAME.floatY + Math.sin(t * 2.4) * 0.12;
+      this.pitch = 0;
+      this.bank = 0;
+      this.speed = 0;
+    } else if (this.state === 'start') {
       this.duckY = GAME.startAlt + Math.sin(t * 0.8) * 1.2;
       this.pitch = Math.sin(t * 0.6) * 0.08;
       this.bank = Math.sin(t * 0.4) * 0.5;
@@ -1524,7 +1617,7 @@ class Game {
     this.updateDuckVisual(dt, this.state === 'gameover' ? 0 : 0.03);
 
     const a = t * 0.18;
-    const dist = this.state === 'gameover' ? 18 : 13;
+    const dist = this.state === 'gameover' ? 18 : this.state === 'ended' ? 10 : 13;
     const target = new THREE.Vector3(
       this.duckX + Math.sin(a) * dist,
       this.duckY + 4 + Math.sin(t * 0.3) * 1.5,
@@ -1611,6 +1704,7 @@ class Game {
   onPassHoop(hoop) {
     this.combo++;
     this.hoopsPassed++;
+    this.stagePassed++;
     // 最大コンボを更新した瞬間をスコア画像用に撮っておく
     if (this.combo > this.maxCombo) {
       this.maxCombo = this.combo;
@@ -1632,6 +1726,7 @@ class Game {
   }
 
   onMissHoop(hoop) {
+    this.stageMissed++;
     if (this.combo > 0) {
       this.retrigger(this.elComboBox, 'break');
       this.showPopup(new THREE.Vector3(hoop.position.x, hoop.position.y, 0), 'MISS', 'miss');
@@ -1643,6 +1738,104 @@ class Game {
     this.stageTimer -= dt;
     if (this.stageTimer <= 0) {
       this.stageTimer = 0;
+      this.startLanding();
+    }
+  }
+
+  // ================================================================
+  //  時間切れ：着水して、そのステージの成績に応じてリアクション
+  // ================================================================
+  startLanding() {
+    this.state = 'landing';
+    this.landT = 0;
+    this.landFromY = this.duckY;
+    this.landSpeed0 = this.speed;
+    this.landSplashed = false;
+    this.landReacted = false;
+    this.flap = 0;
+    this.hoops.clear();
+
+    const tried = this.stagePassed + this.stageMissed;
+    const ratio = tried ? this.stagePassed / tried : 0;
+    this.reaction = tried === 0 ? 'dazed' : ratio >= 0.7 ? 'happy' : ratio >= 0.35 ? 'dazed' : 'head';
+
+    this.stageTitle.textContent = 'TIME UP!';
+    this.stageDesc.textContent = tried
+      ? `このステージ：輪 ${this.stagePassed} / ${tried} 個くぐった`
+      : 'このステージ：輪をくぐれなかった';
+    this.stageOverlay.classList.add('hidden');
+    void this.stageOverlay.offsetWidth;
+    this.stageOverlay.classList.remove('hidden');
+  }
+
+  // アヒルの真下（z=0）にある水面の中央付近の x 座標
+  waterXAtDuck() {
+    const c = this.chunks.find(ch => Math.abs(ch.group.position.z) <= GAME.chunkLength / 2) || this.chunks[0];
+    const cx = routeCurve(c.routeZ - c.group.position.z);
+    return STAGE_CONFIG[this.stageIdx].waterSide === 'center' ? cx : cx - 8;
+  }
+
+  updateLanding(dt) {
+    const lerp = THREE.MathUtils.lerp;
+    this.landT += dt;
+    const t = this.landT;
+    const D = GAME.landDescent;
+    const now = performance.now() * 0.001;
+
+    if (t < D) {
+      // 水面へ降下し、最後に機首を上げてふわっと着水
+      const p = t / D;
+      const e = 1 - Math.pow(1 - p, 2.2);
+      this.duckY = lerp(this.landFromY, GAME.floatY, e);
+      // 陸に降りないよう、真下の水面の中央へ寄っていく
+      this.duckX = lerp(this.duckX, this.waterXAtDuck(), Math.min(1, dt * 2.5));
+      this.pitch = p < 0.7 ? lerp(this.pitch, 0.35, Math.min(1, dt * 4)) : lerp(0.35, -0.35, (p - 0.7) / 0.3);
+      this.speed = lerp(this.landSpeed0, 8, p);
+    } else {
+      if (!this.landSplashed) {
+        this.landSplashed = true;
+        this.particles.splash(this.duckX, GAME.waterLevel, 0);
+        this.sound.playSplash();
+        this.shake = 0.4;
+        this.duck.upright = 1;
+      }
+      this.speed = Math.max(0, this.speed - dt * 14);
+      this.pitch = lerp(this.pitch, 0, Math.min(1, dt * 5));
+      this.duckY = GAME.floatY + Math.sin(now * 2.4) * 0.12;
+      this.duckX = lerp(this.duckX, this.waterXAtDuck(), Math.min(1, dt * 2));
+
+      if (!this.landReacted && t > D + 0.5) {
+        this.landReacted = true;
+        this.duck.reaction = this.reaction;
+        this.sound.playReaction(this.reaction);
+        const label = { happy: 'やったー！', dazed: '…？', head: 'うぅ…' }[this.reaction];
+        this.showPopup(new THREE.Vector3(this.duckX, this.duckY + 3.6, 0), label, `react ${this.reaction}`, 2400);
+      }
+      if (this.reaction === 'happy' && this.landReacted && Math.random() < dt * 3) {
+        this.particles.burst(this.duckX + (Math.random() - 0.5) * 4, this.duckY + 2 + Math.random() * 2, 0, null, false);
+      }
+    }
+    this.bank = lerp(this.bank, 0, Math.min(1, dt * 4));
+    this.updateDuckVisual(dt);
+
+    if (t < D) {
+      // 降下中はいつもの後ろからのカメラ
+      const k = Math.min(1, dt * 6);
+      this.camera.position.set(
+        this.duckX,
+        lerp(this.camera.position.y, this.duckY + 8, k),
+        lerp(this.camera.position.z, -14 - this.speed * 0.12, k)
+      );
+      this.camera.lookAt(this.duckX, this.duckY, 12);
+    } else {
+      // 着水後は正面へ回り込んで表情を見せる
+      const target = new THREE.Vector3(this.duckX + 3.2, this.duckY + 3.2, 13);
+      this.camera.position.lerp(target, Math.min(1, dt * 2.5));
+      this.camera.lookAt(this.duckX, this.duckY + 1.6, 0);
+    }
+    this.applyCameraFx(dt);
+
+    if (t > D + GAME.landReact) {
       if (this.stageIdx < STAGE_CONFIG.length - 1) {
         this.startStage(this.stageIdx + 1);
       } else {
@@ -1735,6 +1928,8 @@ class Game {
 
   goTitle() {
     this.state = 'start';
+    this.duck.upright = 0;
+    this.duck.reaction = null;
     this.stageIdx = 0;
     this.score = 0;
     this.combo = 0;
@@ -1988,6 +2183,9 @@ class Game {
         this.stageOverlay.classList.add('hidden');
         this.state = 'playing';
       }
+    } else if (this.state === 'landing') {
+      this.updateLanding(dt);
+      this.scrollWorld(dt);
     } else if (this.state === 'playing') {
       this.updatePhysics(dt);
       if (this.state !== 'gameover') {
