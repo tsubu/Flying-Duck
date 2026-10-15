@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flying-Duck</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=M+PLUS+Rounded+1c:wght@500;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <!-- 画面効果レイヤー -->
+  <div id="vignette"></div>
+  <div id="danger"></div>
+  <div id="flash"></div>
+  <div id="popups"></div>
+
+  <div id="ui">
+    <div id="comboDisplay" class="combo-display">
+      <div id="comboNumber">0</div>
+      <div class="combo-label">COMBO!</div>
+    </div>
+
+    <div class="top-center">
+      <div class="score-label">SCORE</div>
+      <div id="scoreTop" class="score-top">0</div>
+      <div id="timeTop" class="time-top">2:00</div>
+    </div>
+
+    <div class="stage-bottom">
+      <span class="stage-num">STAGE <b id="stageNum">1</b></span>
+      <span id="stageBottom" class="stage-name">川の上</span>
+    </div>
+
+    <div class="altitude-bar">
+      <div class="label">ALT</div>
+      <div class="bar-outer">
+        <div class="bar-wrap">
+          <div class="bar-danger"></div>
+          <div id="altBar"></div>
+        </div>
+        <div id="altMarker"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="overlay" class="overlay title-screen">
+    <div class="panel">
+      <div class="logo-sub">空飛ぶアヒルの輪くぐり</div>
+      <h1>Flying-Duck</h1>
+      <p>アヒルが滑空しながら、空中の輪をくぐり抜けよう！<br>
+      連続でくぐるとスコアアップ。全3面、それぞれ約2分間のフライト。</p>
+      <button id="startBtn">START</button>
+      <div class="controls-hint">
+        <span><kbd>↓</kbd><kbd>S</kbd>上昇</span>
+        <span><kbd>↑</kbd><kbd>W</kbd>下降</span>
+        <span><kbd>←</kbd><kbd>→</kbd><kbd>A</kbd><kbd>D</kbd>左右移動</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="stageOverlay" class="overlay stage-overlay hidden">
+    <div class="stage-banner">
+      <h2 id="stageTitle">STAGE 1</h2>
+      <p id="stageDesc">川の上を滑空しよう</p>
+    </div>
+  </div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
