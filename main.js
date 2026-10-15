@@ -455,11 +455,11 @@ class Duck {
     let headX = headBase + Math.sin(t * 1.3) * 0.05;
     let hop = 0;
     if (this.reaction === 'happy') {
-      // 両腕を上げて振りながらぴょんぴょん跳ねる
-      armZ = 1.2 + Math.sin(t * 14) * 0.4;
-      hop = Math.abs(Math.sin(t * 6.5)) * 0.7;
-      headZ = Math.sin(t * 6.5) * 0.14;
-      headX = headBase - 0.12;
+      // 腕を斜め45度下に広げて、ぴょんぴょんジャンプ
+      armZ = -0.78 + Math.sin(t * 10) * 0.06;
+      hop = Math.abs(Math.sin(t * 5)) * 1.1;
+      headZ = Math.sin(t * 5) * 0.06;
+      headX = headBase - 0.08;
     } else if (this.reaction === 'dazed') {
       // 腕をだらんと下げ、頭をゆっくりフラフラ
       armZ = -0.85;
