@@ -392,7 +392,9 @@ class Duck {
 
     // 滑空しているので腕はほとんど動かない（微かな揺れのみ）
     const t = performance.now() * 0.001;
-    const w = Math.sin(t * 3 + speed * 0.1) * 0.06 + Math.sin(t * 9) * flap;
+    // flap が大きいときは腕をパタパタ羽ばたかせる（上昇中）
+    this.flapPhase = (this.flapPhase || 0) + dt * (9 + flap * 14);
+    const w = Math.sin(t * 3 + speed * 0.1) * 0.06 + Math.sin(this.flapPhase) * flap;
     this.lWing.rotation.y = w;
     this.rWing.rotation.y = -w;
 
@@ -1155,6 +1157,7 @@ class Game {
     this.introTimer = 0;
     this.shake = 0;
     this.lastCombo = 0;
+    this.flap = 0;
 
     this.bindUI();
     this.createLabels();
@@ -1418,7 +1421,9 @@ class Game {
       return;
     }
 
-    this.updateDuckVisual(dt);
+    // 上昇操作中は腕をパタパタさせる（見た目だけ）
+    this.flap = THREE.MathUtils.lerp(this.flap, this.input.down() ? 0.6 : 0, Math.min(1, dt * 8));
+    this.updateDuckVisual(dt, this.flap);
 
     // カメラはアヒルの真後ろから追従（左右の逆転を防ぐため X は完全に同期）
     const t = performance.now() * 0.001;
