@@ -31,7 +31,7 @@ const STAGE_CONFIG = [
 ];
 
 const GAME = {
-  stageDuration: 120,     // 各ステージ約2分
+  stageDuration: 60,      // 各ステージ約1分
   chunkLength: 40,
   chunkCount: 14,
   chunkWidth: 160,
