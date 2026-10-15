@@ -59,6 +59,10 @@
       <p>アヒルが滑空しながら、空中の輪をくぐり抜けよう！<br>
       連続でくぐるとスコアアップ。全3面、それぞれ約2分間のフライト。</p>
       <button id="startBtn">START</button>
+      <div class="title-sub">
+        <span class="hi">HI-SCORE <b id="titleHi">0</b></span>
+        <button id="rankBtn" class="btn-sub" type="button">ランキング</button>
+      </div>
       <div class="controls-hint">
         <span><kbd>↓</kbd><kbd>S</kbd>上昇</span>
         <span><kbd>↑</kbd><kbd>W</kbd>下降</span>
@@ -66,6 +70,52 @@
       </div>
     </div>
   </div>
+
+  <!-- リザルト -->
+  <div id="result" class="overlay result-screen hidden">
+    <div class="rpanel">
+      <div class="logo-sub" id="rSubTitle">SPLASH!</div>
+      <div class="rtitle" id="rTitle">GAME OVER</div>
+      <div class="rmsg" id="rMsg"></div>
+      <table class="rstats" id="rStats"></table>
+      <div class="rscore">FINAL SCORE<b id="rScore">0</b></div>
+      <div id="entry" class="entry hidden">
+        <div class="lbl">★ NEW RECORD ★　名前を入力</div>
+        <div class="entry-row">
+          <input id="nameIn" maxlength="10" autocomplete="off" spellcheck="false" />
+          <button class="btn-sub" type="button" id="nameOk">登録する</button>
+        </div>
+      </div>
+      <div id="shareBox" class="share hidden">
+        <img id="cardImg" alt="スコア画像">
+        <div class="btn-row">
+          <button class="btn-sub btn-x" type="button" id="btnX">𝕏 にポスト（画像をコピー）</button>
+          <button class="btn-sub" type="button" id="btnSave">画像を保存</button>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn-sub" type="button" id="rRank">ランキング</button>
+        <button class="btn-sub btn-main" type="button" id="rRetry">もう一度</button>
+        <button class="btn-sub" type="button" id="rTitleBtn">タイトルへ</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ランキング -->
+  <div id="ranking" class="overlay result-screen hidden">
+    <div class="rpanel">
+      <div class="logo-sub">TOP 10</div>
+      <div class="rtitle">RANKING</div>
+      <div class="rmsg">このブラウザ内に保存されたランキング</div>
+      <table class="rank-table" id="rankTable"></table>
+      <div class="btn-row">
+        <button class="btn-sub" type="button" id="rkBack">戻る</button>
+        <button class="btn-sub" type="button" id="rkClear">リセット</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
 
   <div id="stageOverlay" class="overlay stage-overlay hidden">
     <div class="stage-banner">

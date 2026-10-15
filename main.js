@@ -170,6 +170,7 @@ class Input {
   constructor() {
     this.keys = {};
     window.addEventListener('keydown', (e) => {
+      if (e.target.tagName === 'INPUT') return;   // 名前入力中はゲーム操作にしない
       this.keys[e.code] = true;
       if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
     });
@@ -1158,6 +1159,19 @@ class Game {
     this.shake = 0;
     this.lastCombo = 0;
     this.flap = 0;
+    this.hoopsPassed = 0;
+    this.maxCombo = 0;
+
+    // リザルト用（キャプチャ・スコア画像）
+    this.lastResult = null;
+    this.captureReq = false;
+    this.cardPending = false;
+    this.lastCapture = null;
+    this.cardBlob = null;
+    this.cardURL = null;
+    this.toastTimer = 0;
+    this.memRank = [];
+    this.rankFrom = 'title';
 
     this.bindUI();
     this.createLabels();
@@ -1268,7 +1282,34 @@ class Game {
     this.stageTitle = document.getElementById('stageTitle');
     this.stageDesc = document.getElementById('stageDesc');
 
-    document.getElementById('startBtn').addEventListener('click', () => this.startGame());
+    const $ = (id) => document.getElementById(id);
+    this.elResult = $('result');
+    this.elRanking = $('ranking');
+    this.elToast = $('toast');
+    this.elNameIn = $('nameIn');
+
+    $('startBtn').addEventListener('click', () => this.startGame());
+    $('rankBtn').addEventListener('click', () => this.showRanking(null, 'title'));
+    $('rRetry').addEventListener('click', () => this.startGame());
+    $('rTitleBtn').addEventListener('click', () => this.goTitle());
+    $('rRank').addEventListener('click', () => this.showRanking(this.lastResult?.id || null, 'result'));
+    $('rkBack').addEventListener('click', () => {
+      if (this.rankFrom === 'result') this.showScreen('result');
+      else this.showScreen('title');
+    });
+    $('rkClear').addEventListener('click', () => {
+      if (confirm('ランキングをすべて削除しますか？')) {
+        this.saveRank([]);
+        this.showRanking(null, this.rankFrom);
+      }
+    });
+    $('nameOk').addEventListener('click', () => this.register());
+    this.elNameIn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); this.register(); }
+    });
+    $('btnX').addEventListener('click', () => this.postToX());
+    $('btnSave').addEventListener('click', () => this.saveCard());
+    this.updateTitleHi();
   }
 
   createLabels() {
@@ -1343,7 +1384,9 @@ class Game {
 
   startGame() {
     this.sound.init();
-    this.overlay.classList.add('hidden');
+    this.showScreen(null);
+    this.lastCapture = null;
+    this.lastResult = null;
     this.resetGame();
     this.startStage(0);
   }
@@ -1351,6 +1394,8 @@ class Game {
   resetGame() {
     this.score = 0;
     this.combo = 0;
+    this.hoopsPassed = 0;
+    this.maxCombo = 0;
     this.stageIdx = 0;
     this.duckY = GAME.startAlt;
     this.duckX = 0;
@@ -1565,6 +1610,12 @@ class Game {
 
   onPassHoop(hoop) {
     this.combo++;
+    this.hoopsPassed++;
+    // 最大コンボを更新した瞬間をスコア画像用に撮っておく
+    if (this.combo > this.maxCombo) {
+      this.maxCombo = this.combo;
+      this.captureReq = true;
+    }
     const gained = 100 + this.combo * 50;
     this.score += gained;
     this.particles.burst(hoop.position.x, hoop.position.y, 0, hoop.userData.color);
@@ -1600,30 +1651,312 @@ class Game {
     }
   }
 
-  showResult(sub, title, html) {
-    this.stageOverlay.classList.add('hidden');
-    this.overlay.classList.remove('hidden');
-    this.overlay.querySelector('.logo-sub').textContent = sub;
-    this.overlay.querySelector('h1').textContent = title;
-    this.overlay.querySelector('p').innerHTML = html;
-    this.overlay.querySelector('button').textContent = 'RETRY';
-    this.overlay.querySelector('.controls-hint').style.display = 'none';
-  }
-
   gameOver() {
     this.state = 'gameover';
     this.particles.splash(this.duckX, GAME.waterLevel, 0);
     this.hoops.clear();
     this.shake = 1;
-    this.showResult('SPLASH!', 'GAME OVER',
-      `水に落ちてしまいました…<br>スコア：<strong>${this.score.toLocaleString()}</strong>　コンボ：${this.combo}`);
+    this.stageOverlay.classList.add('hidden');
+    // 水しぶきを少し見せてからリザルトへ
+    setTimeout(() => { if (this.state === 'gameover') this.showResult(false); }, 1200);
   }
 
   endGame() {
     this.state = 'ended';
     this.hoops.clear();
-    this.showResult('CONGRATULATIONS', 'GAME CLEAR!',
-      `全3面をクリアしました。<br>最終スコア：<strong>${this.score.toLocaleString()}</strong>　最終コンボ：${this.combo}`);
+    this.showResult(true);
+  }
+
+  // ================================================================
+  //  リザルト
+  // ================================================================
+  showResult(win) {
+    const cfg = STAGE_CONFIG[this.stageIdx];
+    const stageLabel = win ? 'ALL CLEAR' : `STAGE ${this.stageIdx + 1}`;
+    this.lastResult = {
+      score: this.score, win, stageLabel, stageName: win ? '全3面クリア' : cfg.name,
+      hoops: this.hoopsPassed, maxCombo: this.maxCombo,
+      name: null, saved: false, id: null, date: new Date(),
+    };
+
+    document.getElementById('rSubTitle').textContent = win ? 'CONGRATULATIONS' : 'SPLASH!';
+    const title = document.getElementById('rTitle');
+    title.textContent = win ? 'GAME CLEAR!' : 'GAME OVER';
+    title.classList.toggle('clear', win);
+    document.getElementById('rMsg').textContent = win
+      ? '全3面を飛び切りました！ 見事なフライト！'
+      : `${cfg.name}で水に落ちてしまいました…`;
+
+    const rows = [
+      ['到達ステージ', win ? 'ALL CLEAR' : `${stageLabel}　${cfg.name}`],
+      ['くぐった輪', `${this.hoopsPassed} 個`],
+      ['最大コンボ', `${this.maxCombo}`],
+    ];
+    const tb = document.getElementById('rStats');
+    tb.innerHTML = '';
+    rows.forEach(([a, b]) => {
+      const tr = document.createElement('tr');
+      const t1 = document.createElement('td'); t1.textContent = a;
+      const t2 = document.createElement('td'); t2.className = 'n'; t2.textContent = b;
+      tr.append(t1, t2);
+      tb.append(tr);
+    });
+    document.getElementById('rScore').textContent = this.score.toLocaleString();
+
+    // スコア画像：キャプチャが無ければ今の画面を撮ってから作る
+    document.getElementById('shareBox').classList.add('hidden');
+    if (!this.lastCapture) this.captureReq = true;
+    this.cardPending = true;
+
+    const q = this.qualifies(this.score);
+    document.getElementById('entry').classList.toggle('hidden', !q);
+    this.showScreen('result');
+    if (q) {
+      let last = 'DUCK';
+      try { last = localStorage.getItem('flyingDuck.lastName') || 'DUCK'; } catch (e) {}
+      this.elNameIn.value = last;
+      setTimeout(() => { this.elNameIn.focus(); this.elNameIn.select(); }, 50);
+    }
+  }
+
+  register() {
+    const r = this.lastResult;
+    if (!r || r.saved) return;
+    const name = (this.elNameIn.value || 'DUCK').trim().slice(0, 10).toUpperCase() || 'DUCK';
+    try { localStorage.setItem('flyingDuck.lastName', name); } catch (e) {}
+    r.id = this.addRank(name, r.score, r.stageLabel);
+    r.saved = true;
+    r.name = name;
+    this.buildCard();
+    document.getElementById('entry').classList.add('hidden');
+    this.sound.playPass(10);
+    this.showRanking(r.id, 'result');
+  }
+
+  goTitle() {
+    this.state = 'start';
+    this.stageIdx = 0;
+    this.score = 0;
+    this.combo = 0;
+    this.duckX = 0;
+    this.duckY = GAME.startAlt;
+    this.stageTimer = GAME.stageDuration;
+    this.hoops.clear();
+    this.applyStage(0);
+    this.chunks.forEach((c, i) => c.reset(0, i * GAME.chunkLength - 80));
+    this.elStage.textContent = STAGE_CONFIG[0].name;
+    this.elStageNum.textContent = 1;
+    this.showScreen('title');
+  }
+
+  showScreen(id) {
+    this.overlay.classList.toggle('hidden', id !== 'title');
+    this.elResult.classList.toggle('hidden', id !== 'result');
+    this.elRanking.classList.toggle('hidden', id !== 'ranking');
+    if (id === 'title') this.updateTitleHi();
+  }
+
+  updateTitleHi() {
+    document.getElementById('titleHi').textContent = this.topScore().toLocaleString();
+  }
+
+  // ================================================================
+  //  スコア画像 / X へのポスト
+  // ================================================================
+  // WebGL の描画直後に 2D キャンバスへ写し取る（preserveDrawingBuffer 不要）
+  grabFrame() {
+    const src = this.renderer.domElement;
+    const w = 1200, h = Math.round(w * src.height / src.width);
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    c.getContext('2d').drawImage(src, 0, 0, w, h);
+    this.lastCapture = c;
+  }
+
+  async buildCard() {
+    const r = this.lastResult;
+    if (!r) return;
+    try {
+      await document.fonts.load('700 80px Fredoka');
+      await document.fonts.load('800 24px "M PLUS Rounded 1c"');
+    } catch (e) {}
+    const W = 1200, H = 630;
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const g = c.getContext('2d');
+    g.fillStyle = '#87ceeb';
+    g.fillRect(0, 0, W, H);
+    if (this.lastCapture) {
+      const cap = this.lastCapture;
+      const k = Math.max(W / cap.width, H / cap.height);
+      const dw = cap.width * k, dh = cap.height * k;
+      g.drawImage(cap, (W - dw) / 2, (H - dh) / 2, dw, dh);
+    }
+    // 左側を暗くして文字を読みやすく
+    const gr = g.createLinearGradient(0, 0, W, 0);
+    gr.addColorStop(0, 'rgba(20,32,60,.9)');
+    gr.addColorStop(0.52, 'rgba(20,32,60,.55)');
+    gr.addColorStop(1, 'rgba(20,32,60,0)');
+    g.fillStyle = gr;
+    g.fillRect(0, 0, W, H);
+    g.strokeStyle = 'rgba(255,210,63,.9)';
+    g.lineWidth = 4;
+    g.beginPath();
+    g.roundRect(18, 18, W - 36, H - 36, 26);
+    g.stroke();
+
+    // 縁取り付きの文字
+    const text = (str, x, y, font, fill, stroke = '#1b2a4a', lw = 8) => {
+      g.font = font;
+      g.lineJoin = 'round';
+      if (stroke) { g.strokeStyle = stroke; g.lineWidth = lw; g.strokeText(str, x, y); }
+      g.fillStyle = fill;
+      g.fillText(str, x, y);
+    };
+    text('Flying-Duck', 60, 118, '700 76px Fredoka, sans-serif', '#ffffff', '#1b2a4a', 12);
+    text('空飛ぶアヒルの輪くぐり', 64, 166, '800 26px "M PLUS Rounded 1c", sans-serif', '#ffd23f', '#1b2a4a', 6);
+    text(r.win ? 'GAME CLEAR!' : 'GAME OVER', 60, 250, '700 46px Fredoka, sans-serif', r.win ? '#ffd23f' : '#ffffff', '#1b2a4a', 8);
+    text('FINAL SCORE', 64, 312, '600 22px Fredoka, sans-serif', '#ffd23f', null);
+    text(r.score.toLocaleString(), 56, 410, '700 104px Fredoka, sans-serif', '#ffffff', '#1b2a4a', 12);
+    text(`到達: ${r.win ? 'ALL CLEAR' : `${r.stageLabel} ${r.stageName}`}`, 64, 466, '800 26px "M PLUS Rounded 1c", sans-serif', '#eef4ff', null);
+    text(`輪: ${r.hoops}個　最大コンボ: ${r.maxCombo}`, 64, 506, '800 26px "M PLUS Rounded 1c", sans-serif', '#eef4ff', null);
+    if (r.name) text(`PLAYER: ${r.name}`, 64, 546, '700 24px Fredoka, "M PLUS Rounded 1c", sans-serif', '#ffd23f', null);
+    const d = r.date;
+    const ds = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+    text(`#FlyingDuck　${ds}`, W - 330, H - 44, '600 22px Fredoka, "M PLUS Rounded 1c", sans-serif', 'rgba(255,255,255,.95)', '#1b2a4a', 5);
+
+    c.toBlob((b) => {
+      if (!b) return;
+      this.cardBlob = b;
+      if (this.cardURL) URL.revokeObjectURL(this.cardURL);
+      this.cardURL = URL.createObjectURL(b);
+      document.getElementById('cardImg').src = this.cardURL;
+      document.getElementById('shareBox').classList.remove('hidden');
+    }, 'image/png');
+  }
+
+  shareText() {
+    const r = this.lastResult;
+    let t = `Flying-Duck（空飛ぶアヒルの輪くぐり）で ${r.score.toLocaleString()} 点！`
+      + ` 到達: ${r.win ? 'ALL CLEAR' : r.stageLabel} / 輪 ${r.hoops}個 / 最大${r.maxCombo}コンボ`
+      + `${r.win ? ' 全3面クリア！' : ''}\n#FlyingDuck`;
+    if (/^https?:$/.test(location.protocol) && !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) {
+      t += '\n' + location.origin + location.pathname;
+    }
+    return t;
+  }
+
+  toast(msg, ms = 5000) {
+    this.elToast.textContent = msg;
+    this.elToast.classList.add('on');
+    clearTimeout(this.toastTimer);
+    this.toastTimer = setTimeout(() => this.elToast.classList.remove('on'), ms);
+  }
+
+  saveCard() {
+    if (!this.cardURL) return;
+    const a = document.createElement('a');
+    a.href = this.cardURL;
+    a.download = `flying-duck-${this.lastResult.score}.png`;
+    document.body.append(a);
+    a.click();
+    a.remove();
+  }
+
+  async postToX() {
+    if (!this.lastResult) return;
+    const url = 'https://twitter.com/intent/tweet?text=' + encodeURIComponent(this.shareText());
+    // 1) 画像をクリップボードへコピー（タブが切り替わる前に完了させる）
+    let copied = false;
+    if (this.cardBlob && navigator.clipboard && window.ClipboardItem) {
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': Promise.resolve(this.cardBlob) })]);
+        copied = true;
+      } catch (e) {}
+    }
+    if (!copied) this.saveCard();
+    const isTouch = matchMedia('(pointer: coarse)').matches;
+    this.toast(copied
+      ? (isTouch
+        ? 'スコア画像をコピーしました。X の投稿画面で本文を長押し →「ペースト」で画像を添付してください。'
+        : 'スコア画像をコピーしました。X の投稿画面で貼り付け（⌘V / Ctrl+V）してください。')
+      : '画像をクリップボードにコピーできなかったため、保存しました。X の投稿画面で画像を添付してください。', 9000);
+    // 2) コピー済みの状態で X の投稿画面を開く
+    window.open(url, '_blank', 'noopener');
+  }
+
+  // ================================================================
+  //  ランキング（ブラウザ内 localStorage・上位10件）
+  // ================================================================
+  loadRank() {
+    try {
+      const a = JSON.parse(localStorage.getItem('flyingDuck.ranking.v1') || '[]');
+      return Array.isArray(a) ? a : this.memRank;
+    } catch (e) {
+      return this.memRank;
+    }
+  }
+
+  saveRank(a) {
+    this.memRank = a;
+    try { localStorage.setItem('flyingDuck.ranking.v1', JSON.stringify(a)); } catch (e) {}
+  }
+
+  topScore() {
+    const a = this.loadRank();
+    return a.length ? a[0].score : 0;
+  }
+
+  qualifies(score) {
+    const a = this.loadRank();
+    return score > 0 && (a.length < 10 || score > a[a.length - 1].score);
+  }
+
+  addRank(name, score, stage) {
+    const a = this.loadRank();
+    const id = Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+    const d = new Date();
+    const date = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+    a.push({ id, name, score, stage, date });
+    a.sort((x, y) => y.score - x.score);
+    this.saveRank(a.slice(0, 10));
+    return id;
+  }
+
+  showRanking(highlight = null, from = 'title') {
+    this.rankFrom = from;
+    const a = this.loadRank();
+    const tb = document.getElementById('rankTable');
+    tb.innerHTML = '';
+    const hr = document.createElement('tr');
+    ['#', 'NAME', 'SCORE', 'STAGE', 'DATE'].forEach(h => {
+      const th = document.createElement('th');
+      th.textContent = h;
+      hr.append(th);
+    });
+    tb.append(hr);
+    if (!a.length) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 5;
+      td.style.textAlign = 'center';
+      td.style.color = '#b8c4dc';
+      td.textContent = 'まだ記録がありません';
+      tr.append(td);
+      tb.append(tr);
+    }
+    a.forEach((r, i) => {
+      const tr = document.createElement('tr');
+      if (r.id === highlight) tr.className = 'me';
+      [[i + 1, ''], [r.name, ''], [r.score.toLocaleString(), 'n'], [r.stage, ''], [r.date, '']].forEach(([v, cls]) => {
+        const td = document.createElement('td');
+        td.textContent = v;
+        if (cls) td.className = cls;
+        tr.append(td);
+      });
+      tb.append(tr);
+    });
+    this.showScreen('ranking');
   }
 
   updateUI() {
@@ -1669,6 +2002,8 @@ class Game {
     this.updateEffects(dt);
     this.updateUI();
     this.renderer.render(this.scene, this.camera);
+    if (this.captureReq) { this.captureReq = false; this.grabFrame(); }
+    if (this.cardPending && !this.captureReq) { this.cardPending = false; this.buildCard(); }
     this.updateLabels();
 
     requestAnimationFrame(this.loop);
