@@ -1255,6 +1255,7 @@ class Game {
     this.toastTimer = 0;
     this.memRank = [];
     this.rankFrom = 'title';
+    this.paused = false;
 
     this.bindUI();
     this.createLabels();
@@ -1392,7 +1393,42 @@ class Game {
     });
     $('btnX').addEventListener('click', () => this.postToX());
     $('btnSave').addEventListener('click', () => this.saveCard());
+
+    // ポーズ（Esc キー / P キー）。タブを切り替えたときも自動でポーズ
+    this.elPause = $('pause');
+    $('pResume').addEventListener('click', () => this.togglePause(false));
+    $('pTitle').addEventListener('click', () => {
+      this.togglePause(false);
+      this.goTitle();
+    });
+    window.addEventListener('keydown', (e) => {
+      if (e.target.tagName === 'INPUT') return;
+      if (e.code === 'Escape' || e.code === 'KeyP') {
+        e.preventDefault();
+        this.togglePause();
+      }
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) this.togglePause(true);
+    });
     this.updateTitleHi();
+  }
+
+  canPause() {
+    return this.state === 'playing' || this.state === 'intro' || this.state === 'landing';
+  }
+
+  togglePause(force) {
+    const next = force ?? !this.paused;
+    if (next && !this.canPause()) return;
+    if (next === this.paused) return;
+    this.paused = next;
+    this.elPause.classList.toggle('hidden', !next);
+    document.body.classList.toggle('paused', next);
+    if (next) {
+      this.input.keys = {};           // 押しっぱなしのキーを解除
+      document.body.classList.remove('danger');
+    }
   }
 
   createLabels() {
@@ -1928,6 +1964,7 @@ class Game {
 
   goTitle() {
     this.state = 'start';
+    this.stageOverlay.classList.add('hidden');
     this.duck.upright = 0;
     this.duck.reaction = null;
     this.stageIdx = 0;
@@ -2174,6 +2211,13 @@ class Game {
   loop(now) {
     const dt = Math.min((now - this.lastTime) / 1000, 0.05);
     this.lastTime = now;
+
+    // ポーズ中は時間を止めて描画だけ続ける
+    if (this.paused) {
+      this.renderer.render(this.scene, this.camera);
+      requestAnimationFrame(this.loop);
+      return;
+    }
 
     if (this.state === 'intro') {
       this.introTimer -= dt;

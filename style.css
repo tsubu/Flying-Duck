@@ -666,3 +666,9 @@ button.btn-sub.btn-x { background: #111; color: #fff; border-color: #111; box-sh
   85% { transform: translate(-50%, -75%) scale(1); opacity: 1; }
   100% { transform: translate(-50%, -95%) scale(0.95); opacity: 0; }
 }
+
+/* ポーズ */
+.pause-panel { width: auto; min-width: 300px; }
+body.paused .stage-banner,
+body.paused .stage-banner *,
+body.paused .popup { animation-play-state: paused !important; }
